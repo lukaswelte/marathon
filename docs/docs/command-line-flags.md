@@ -2,6 +2,11 @@
 title: Command Line Flags
 ---
 
+# Environment Variables
+
+* `JAVA_OPTS`  Default: `-Xmx512m`
+    Any options that should be passed to the JVM that marathon will run in.
+
 # Marathon Command Line Flags
 
 The following options can influence how Marathon works:
@@ -27,12 +32,10 @@ The following options can influence how Marathon works:
     during mesos-slave restarts and upgrades.
 * `--executor` (Optional. Default: "//cmd"): Executor to use when none is
     specified.
-* `--executor_health_checks` (Optional. Default: false)): If this flag is supplied,
-    health checks are executed on the slaves on which the tasks are running.
-    Requires Mesos `0.20.0` or higher. Use of this option limits app health
-    checks to at most one. The only protocol supported by Mesos is COMMAND.
 * `--failover_timeout` (Optional. Default: 604800 seconds (1 week)): The
     failover_timeout for Mesos in seconds.
+* `--framework_name` (Optional. Default: marathon-VERSION): The framework name
+    to register with Mesos.
 * `--ha` (Optional. Default: true): Runs Marathon in HA mode with leader election.
     Allows starting an arbitrary number of other Marathons but all need to be
     started in HA mode. This mode requires a running ZooKeeper. See `--master`.
@@ -71,6 +74,8 @@ The following options can influence how Marathon works:
     authentication
 * `--mesos_authentication_secret_file` (Optional.): The path to the Mesos secret
     file containing the authentication secret
+* `--marathon_store_timeout` (Optional. Default: 2000 (2 seconds)): Maximum time 
+    in milliseconds, to wait for persistent storage operations to complete. 
 
 ### Optional Flags Inherited from [Chaos](https://github.com/mesosphere/chaos)
 

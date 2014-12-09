@@ -3,14 +3,16 @@ package mesosphere.marathon.health
 import akka.actor.{ Actor, ActorLogging, ActorRef, Cancellable, Props }
 import akka.event.EventStream
 import mesosphere.marathon.MarathonSchedulerDriver
+import mesosphere.marathon.Protos.HealthCheckDefinition.Protocol
 import mesosphere.marathon.Protos.MarathonTask
 import mesosphere.marathon.event._
-import mesosphere.marathon.state.PathId
+import mesosphere.marathon.state.{ PathId, Timestamp }
 import mesosphere.marathon.tasks.TaskTracker
 import mesosphere.mesos.protos.TaskID
 
 class HealthCheckActor(
     appId: PathId,
+    appVersion: String,
     healthCheck: HealthCheck,
     taskTracker: TaskTracker,
     eventBus: EventStream) extends Actor with ActorLogging {
@@ -62,25 +64,28 @@ class HealthCheckActor(
     taskHealth = taskHealth.filterKeys(activeTaskIds)
   }
 
-  protected[this] def scheduleNextHealthCheck(): Unit = {
-    log.debug(
-      "Scheduling next health check for app [{}] and healthCheck [{}]",
-      appId,
-      healthCheck
-    )
-    nextScheduledCheck = Some(
-      context.system.scheduler.scheduleOnce(healthCheck.interval) {
-        self ! Tick
-      }
-    )
-  }
+  protected[this] def scheduleNextHealthCheck(): Unit =
+    if (healthCheck.protocol != Protocol.COMMAND) {
+      log.debug(
+        "Scheduling next health check for app [{}] and healthCheck [{}]",
+        appId,
+        healthCheck
+      )
+      nextScheduledCheck = Some(
+        context.system.scheduler.scheduleOnce(healthCheck.interval) {
+          self ! Tick
+        }
+      )
+    }
 
   protected[this] def dispatchJobs(): Unit = {
     log.debug("Dispatching health check jobs to workers")
     taskTracker.get(appId).foreach { task =>
-      log.debug("Dispatching health check job for task [{}]", task.getId)
-      val worker: ActorRef = context.actorOf(Props[HealthCheckWorkerActor])
-      worker ! HealthCheckJob(task, healthCheck)
+      if (task.getVersion() == appVersion) {
+        log.debug("Dispatching health check job for task [{}]", task.getId)
+        val worker: ActorRef = context.actorOf(Props[HealthCheckWorkerActor])
+        worker ! HealthCheckJob(task, healthCheck)
+      }
     }
   }
 
@@ -116,12 +121,13 @@ class HealthCheckActor(
 
   def receive: Receive = {
     case GetTaskHealth(taskId) => sender() ! taskHealth.get(taskId)
+
     case Tick =>
       purgeStatusOfDoneTasks()
       dispatchJobs()
       scheduleNextHealthCheck()
 
-    case result: HealthResult =>
+    case result: HealthResult if result.version == appVersion =>
       log.info("Received health result: [{}]", result)
       val taskId = result.taskId
       val health = taskHealth.getOrElse(taskId, Health(taskId))
@@ -158,6 +164,10 @@ class HealthCheckActor(
             alive = newHealth.alive)
         )
       }
+
+    case result: HealthResult =>
+      log.warning(s"Ignoring health result [$result] due to version mismatch.")
+
   }
 }
 

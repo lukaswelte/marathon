@@ -2,7 +2,6 @@ package mesosphere.marathon.event
 
 import akka.actor.{ Actor, ActorLogging }
 import akka.event.EventStream
-import org.apache.mesos.{ Protos => mesos }
 import mesosphere.marathon.state.{ TaskFailure, TaskFailureRepository }
 
 class HistoryActor(eventBus: EventStream, taskFailureRepository: TaskFailureRepository)
@@ -16,6 +15,8 @@ class HistoryActor(eventBus: EventStream, taskFailureRepository: TaskFailureRepo
   def receive: Receive = {
     case TaskFailure.FromMesosStatusUpdateEvent(taskFailure) =>
       taskFailureRepository.store(taskFailure.appId, taskFailure)
+
+    case _: MesosStatusUpdateEvent => // ignore non-failure status updates
 
     case AppTerminatedEvent(appId, eventType, timestamp) =>
       taskFailureRepository.expunge(appId)

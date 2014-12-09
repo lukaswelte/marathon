@@ -23,7 +23,7 @@ import org.apache.zookeeper.ZooDefs
 
 import mesosphere.chaos.http.HttpConf
 import mesosphere.marathon.event.EventModule
-import mesosphere.marathon.health.{ DelegatingHealthCheckManager, HealthCheckManager, MarathonHealthCheckManager }
+import mesosphere.marathon.health.{ HealthCheckManager, MarathonHealthCheckManager }
 import mesosphere.marathon.io.storage.StorageProvider
 import mesosphere.marathon.state._
 import mesosphere.marathon.tasks.{ TaskIdUtil, TaskQueue, TaskTracker }
@@ -52,12 +52,7 @@ class MarathonModule(conf: MarathonConf, http: HttpConf, zk: ZooKeeperClient)
 
     bind(classOf[GroupManager]).in(Scopes.SINGLETON)
 
-    bind(classOf[HealthCheckManager]).to(
-      conf.executorHealthChecks() match {
-        case false => classOf[MarathonHealthCheckManager]
-        case true  => classOf[DelegatingHealthCheckManager]
-      }
-    ).asEagerSingleton()
+    bind(classOf[HealthCheckManager]).to(classOf[MarathonHealthCheckManager]).asEagerSingleton()
 
     bind(classOf[String])
       .annotatedWith(Names.named(ModuleNames.NAMED_SERVER_SET_PATH))
@@ -153,6 +148,7 @@ class MarathonModule(conf: MarathonConf, http: HttpConf, zk: ZooKeeperClient)
     import org.apache.mesos.{ Protos => mesos }
     new TaskFailureRepository(
       new MarathonStore[TaskFailure](
+        conf,
         state,
         registry,
         () => TaskFailure(
@@ -172,7 +168,7 @@ class MarathonModule(conf: MarathonConf, http: HttpConf, zk: ZooKeeperClient)
     conf: MarathonConf,
     registry: MetricRegistry): AppRepository =
     new AppRepository(
-      new MarathonStore[AppDefinition](state, registry, () => AppDefinition.apply()),
+      new MarathonStore[AppDefinition](conf, state, registry, () => AppDefinition.apply()),
       maxVersions = conf.zooKeeperMaxVersions.get,
       registry
     )
@@ -185,7 +181,7 @@ class MarathonModule(conf: MarathonConf, http: HttpConf, zk: ZooKeeperClient)
     conf: MarathonConf,
     registry: MetricRegistry): GroupRepository =
     new GroupRepository(
-      new MarathonStore[Group](state, registry, () => Group.empty, "group:"),
+      new MarathonStore[Group](conf, state, registry, () => Group.empty, "group:"),
       appRepository, conf.zooKeeperMaxVersions.get,
       registry
     )
@@ -197,7 +193,7 @@ class MarathonModule(conf: MarathonConf, http: HttpConf, zk: ZooKeeperClient)
     conf: MarathonConf,
     registry: MetricRegistry): DeploymentRepository =
     new DeploymentRepository(
-      new MarathonStore[DeploymentPlan](state, registry, () => DeploymentPlan.empty, "deployment:"),
+      new MarathonStore[DeploymentPlan](conf, state, registry, () => DeploymentPlan.empty, "deployment:"),
       conf.zooKeeperMaxVersions.get,
       registry
     )

@@ -7,6 +7,7 @@ import akka.testkit.TestActor.{ AutoPilot, NoAutoPilot }
 import akka.testkit.{ TestActorRef, TestKit, TestProbe }
 import akka.util.Timeout
 import com.codahale.metrics.MetricRegistry
+import mesosphere.marathon.health.HealthCheckManager
 import mesosphere.marathon.io.storage.StorageProvider
 import mesosphere.marathon.state.PathId._
 import mesosphere.marathon.state.{ AppDefinition, AppRepository, Group, MarathonStore }
@@ -14,6 +15,7 @@ import mesosphere.marathon.tasks.{ TaskQueue, TaskTracker }
 import mesosphere.marathon.upgrade.DeploymentActor.Cancel
 import mesosphere.marathon.upgrade.DeploymentManager.{ CancelDeployment, PerformDeployment }
 import mesosphere.marathon.{ MarathonConf, SchedulerActions }
+import org.rogach.scallop.ScallopConf
 import org.apache.mesos.SchedulerDriver
 import org.apache.mesos.state.InMemoryState
 import org.scalatest.mock.MockitoSugar
@@ -44,25 +46,28 @@ class DeploymentManagerTest
   var scheduler: SchedulerActions = _
   var appRepo: AppRepository = _
   var storage: StorageProvider = _
+  var hcManager: HealthCheckManager = _
 
   before {
     driver = mock[SchedulerDriver]
     eventBus = mock[EventStream]
     taskQueue = mock[TaskQueue]
-    config = mock[MarathonConf]
+    config = new ScallopConf(Seq("--master", "foo")) with MarathonConf
+    config.afterInit()
     registry = new com.codahale.metrics.MetricRegistry
     taskTracker = new TaskTracker(new InMemoryState, config, registry)
     scheduler = mock[SchedulerActions]
     storage = mock[StorageProvider]
     appRepo = new AppRepository(
-      new MarathonStore[AppDefinition](new InMemoryState, registry, () => AppDefinition()),
+      new MarathonStore[AppDefinition](config, new InMemoryState, registry, () => AppDefinition()),
       None,
       registry
     )
+    hcManager = mock[HealthCheckManager]
   }
 
   test("deploy") {
-    val manager = TestActorRef[DeploymentManager](Props(classOf[DeploymentManager], appRepo, taskTracker, taskQueue, scheduler, storage, eventBus))
+    val manager = TestActorRef[DeploymentManager](Props(classOf[DeploymentManager], appRepo, taskTracker, taskQueue, scheduler, storage, hcManager, eventBus))
 
     val app = AppDefinition("app".toRootPath)
 
@@ -79,7 +84,7 @@ class DeploymentManagerTest
   }
 
   test("StopActor") {
-    val manager = TestActorRef[DeploymentManager](Props(classOf[DeploymentManager], appRepo, taskTracker, taskQueue, scheduler, storage, eventBus))
+    val manager = TestActorRef[DeploymentManager](Props(classOf[DeploymentManager], appRepo, taskTracker, taskQueue, scheduler, storage, hcManager, eventBus))
     val probe = TestProbe()
 
     probe.setAutoPilot(new AutoPilot {
@@ -98,7 +103,7 @@ class DeploymentManagerTest
   }
 
   test("Cancel deployment") {
-    val manager = TestActorRef[DeploymentManager](Props(classOf[DeploymentManager], appRepo, taskTracker, taskQueue, scheduler, storage, eventBus))
+    val manager = TestActorRef[DeploymentManager](Props(classOf[DeploymentManager], appRepo, taskTracker, taskQueue, scheduler, storage, hcManager, eventBus))
 
     implicit val timeout = Timeout(1.minute)
 

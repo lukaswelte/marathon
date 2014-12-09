@@ -72,6 +72,7 @@ class MarathonSchedulerActor(
         taskQueue,
         scheduler,
         storage,
+        healthCheckManager,
         eventBus
       ),
       "UpgradeManager"
@@ -84,6 +85,7 @@ class MarathonSchedulerActor(
       case Success(deployments) => self ! RecoveredDeployments(deployments)
       case Failure(_)           => self ! RecoveredDeployments(Nil)
     }
+
   }
 
   def receive: Receive = recovering
@@ -96,6 +98,7 @@ class MarathonSchedulerActor(
       }
       unstashAll()
       context.become(ready)
+      self ! ReconcileHealthChecks
 
     case _ => stash()
   }
@@ -104,6 +107,9 @@ class MarathonSchedulerActor(
     case ReconcileTasks =>
       scheduler.reconcileTasks(driver)
       sender ! ReconcileTasks.answer
+
+    case ReconcileHealthChecks =>
+      scheduler.reconcileHealthChecks()
 
     case cmd @ ScaleApp(appId) =>
       val origSender = sender()
@@ -115,6 +121,9 @@ class MarathonSchedulerActor(
         else
           res
       }
+
+    case cmd: CancelDeployment =>
+      deploymentManager forward cmd
 
     case cmd @ Deploy(plan, false) =>
       deploy(sender(), cmd, plan, blocking = false)
@@ -248,7 +257,7 @@ class MarathonSchedulerActor(
           deploymentRepository.expunge(plan.id)
 
         case Failure(e) =>
-          log.error(s"Deployment of ${plan.target.id} failed", e)
+          log.error(e, s"Deployment of ${plan.target.id} failed")
           plan.affectedApplicationIds.foreach(appId => taskQueue.purge(appId))
           eventBus.publish(DeploymentFailed(plan.id))
           if (e.isInstanceOf[DeploymentCanceledException])
@@ -268,6 +277,8 @@ object MarathonSchedulerActor {
   case object ReconcileTasks extends Command {
     def answer: Event = TasksReconciled
   }
+
+  case object ReconcileHealthChecks
 
   case class ScaleApp(appId: PathId) extends Command {
     def answer: Event = AppScaled(appId)
@@ -368,8 +379,8 @@ class SchedulerActions(
     * to give Mesos enough time to deliver task updates.
     * @param driver scheduler driver
     */
-  def reconcileTasks(driver: SchedulerDriver): Unit = {
-    appRepository.allPathIds().map(_.toSet).onComplete {
+  def reconcileTasks(driver: SchedulerDriver): Future[Unit] = {
+    appRepository.allPathIds().map(_.toSet).andThen {
       case Success(appIds) =>
         log.info("Syncing tasks for all apps")
 
@@ -395,12 +406,22 @@ class SchedulerActions(
 
         log.info("Requesting task reconciliation with the Mesos master")
         log.debug(s"Tasks to reconcile: $knownTaskStatuses")
-        driver.reconcileTasks(knownTaskStatuses.asJava)
+        if (knownTaskStatuses.nonEmpty)
+          driver.reconcileTasks(knownTaskStatuses.asJava)
+
+        // in addition to the known statuses send an empty list to get the unknown
+        driver.reconcileTasks(java.util.Arrays.asList())
 
       case Failure(t) =>
         log.warn("Failed to get task names", t)
-    }
+    }.map(_ => ())
   }
+
+  def reconcileHealthChecks(): Unit =
+    for {
+      apps <- appRepository.apps()
+      app <- apps
+    } healthCheckManager.reconcileWith(app)
 
   private def newTask(app: AppDefinition,
                       offer: Offer): Option[(TaskInfo, Seq[Long])] = {

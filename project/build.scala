@@ -41,12 +41,25 @@ object MarathonBuild extends Build {
 
   lazy val baseSettings = Defaults.defaultSettings ++ buildInfoSettings ++ Seq (
     organization := "mesosphere",
-    scalaVersion := "2.11.2",
-    scalacOptions in Compile ++= Seq("-encoding", "UTF-8", "-target:jvm-1.6", "-deprecation", "-feature", "-unchecked", "-Xlog-reflective-calls", "-Xlint"),
+    scalaVersion := "2.11.4",
+    scalacOptions in Compile ++= Seq(
+      "-encoding", "UTF-8",
+      "-target:jvm-1.6",
+      "-deprecation",
+      "-feature",
+      "-unchecked",
+      "-Xlog-reflective-calls",
+      "-Xlint",
+      "-Ywarn-unused-import",
+      "-Xfatal-warnings",
+      "-Yno-adapted-args",
+      "-Ywarn-numeric-widen"
+    ),
     javacOptions in Compile ++= Seq("-encoding", "UTF-8", "-source", "1.6", "-target", "1.6", "-Xlint:unchecked", "-Xlint:deprecation"),
     resolvers ++= Seq(
       "Mesosphere Public Repo"    at "http://downloads.mesosphere.io/maven",
       "Twitter Maven2 Repository" at "http://maven.twttr.com/",
+      "Typesafe Releases" at "http://repo.typesafe.com/typesafe/releases/",
       "Spray Maven Repository"    at "http://repo.spray.io/"
     ),
     sourceGenerators in Compile <+= buildInfo,
@@ -119,7 +132,6 @@ object Dependencies {
     akkaSlf4j % "compile",
     sprayClient % "compile",
     sprayHttpx % "compile",
-    json4s % "compile",
     chaos % "compile",
     mesosUtils % "compile",
     jacksonCaseClass % "compile",
@@ -135,6 +147,7 @@ object Dependencies {
     hadoopCommon % "compile",
     beanUtils % "compile",
     scallop % "compile",
+    playJson % "compile",
 
     // test
     Test.scalatest % "test",
@@ -148,10 +161,9 @@ object Dependency {
     // runtime deps versions
     val Chaos = "0.6.1"
     val JacksonCCM = "0.1.2"
-    val MesosUtils = "0.20.1-1"
+    val MesosUtils = "0.21.0-1"
     val Akka = "2.3.6"
     val Spray = "1.3.1"
-    val Json4s = "3.2.10"
     val TwitterCommons = "0.0.60"
     val TwitterZKClient = "0.0.60"
     val Jersey = "1.18.1"
@@ -161,6 +173,7 @@ object Dependency {
     val JGraphT = "0.9.1"
     val Hadoop = "2.4.1"
     val Scallop = "0.9.5"
+    val PlayJson = "2.3.4"
 
     // test deps versions
     val Mockito = "1.9.5"
@@ -174,7 +187,7 @@ object Dependency {
   val akkaSlf4j = "com.typesafe.akka" %% "akka-slf4j" % V.Akka
   val sprayClient = "io.spray" %% "spray-client" % V.Spray
   val sprayHttpx = "io.spray" %% "spray-httpx" % V.Spray
-  val json4s = "org.json4s" %% "json4s-jackson" % V.Json4s
+  val playJson = "com.typesafe.play" %% "play-json" % V.PlayJson
   val chaos = "mesosphere" %% "chaos" % V.Chaos
   val mesosUtils = "mesosphere" %% "mesos-utils" % V.MesosUtils
   val jacksonCaseClass = "mesosphere" %% "jackson-case-class-module" % V.JacksonCCM

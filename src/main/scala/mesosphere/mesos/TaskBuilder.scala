@@ -14,6 +14,7 @@ import org.apache.mesos.Protos._
 import mesosphere.marathon._
 import mesosphere.marathon.state.{ AppDefinition, PathId }
 import mesosphere.marathon.tasks.{ PortsMatcher, TaskTracker }
+import mesosphere.marathon.Protos.HealthCheckDefinition.Protocol
 import mesosphere.marathon.Protos.Constraint
 import mesosphere.mesos.protos.{ RangesResource, Resource, ScalarResource }
 
@@ -63,7 +64,8 @@ class TaskBuilder(app: AppDefinition,
 
     val taskId = newTaskId(app.id)
     val builder = TaskInfo.newBuilder
-      .setName(taskId.getValue)
+      // Use a valid hostname to make service discovery easier
+      .setName(app.id.toHostname)
       .setTaskId(taskId)
       .setSlaveId(offer.getSlaveId)
       .addResources(ScalarResource(Resource.CPUS, app.cpus, cpuRole))
@@ -93,7 +95,7 @@ class TaskBuilder(app: AppDefinition,
 
     executor match {
       case CommandExecutor() =>
-        builder.setCommand(TaskBuilder.commandInfo(app, host, ports))
+        builder.setCommand(TaskBuilder.commandInfo(app, Some(taskId), host, ports))
         for (c <- containerProto) builder.setContainer(c)
 
       case PathExecutor(path) =>
@@ -102,7 +104,7 @@ class TaskBuilder(app: AppDefinition,
         val cmd = app.cmd orElse app.args.map(_ mkString " ") getOrElse ""
         val shell = s"chmod ug+rx $executorPath && exec $executorPath $cmd"
         val command =
-          TaskBuilder.commandInfo(app, host, ports).toBuilder.setValue(shell)
+          TaskBuilder.commandInfo(app, Some(taskId), host, ports).toBuilder.setValue(shell)
 
         val info = ExecutorInfo.newBuilder()
           .setExecutorId(ExecutorID.newBuilder().setValue(executorId))
@@ -114,35 +116,32 @@ class TaskBuilder(app: AppDefinition,
         builder.setData(ByteString.copyFrom(binary.toByteArray))
     }
 
-    if (config.executorHealthChecks()) {
-      import mesosphere.marathon.Protos.HealthCheckDefinition.Protocol
-
-      // Mesos supports at most one health check, and only COMMAND checks
-      // are currently implemented.
-      val mesosHealthCheck: Option[org.apache.mesos.Protos.HealthCheck] =
-        app.healthChecks.collectFirst {
-          case healthCheck if healthCheck.protocol == Protocol.COMMAND =>
-            Try(healthCheck.toMesos(ports.map(_.toInt))) match {
-              case Success(mhc) => Some(mhc)
-              case Failure(cause) =>
-                log.warn(
-                  s"An error occurred with health check [$healthCheck]\n" +
-                    s"Error: [${cause.getMessage}]")
-                None
-            }
-        }.flatten
-
-      mesosHealthCheck foreach builder.setHealthCheck
-
-      if (mesosHealthCheck.size < app.healthChecks.size) {
-        val numUnusedChecks = app.healthChecks.size - mesosHealthCheck.size
-        log.warn(
-          "Mesos supports one command health check per task.\n" +
-            s"Task [$taskId] will run without " +
-            s"$numUnusedChecks of its defined health checks."
-        )
+    // Mesos supports at most one health check, and only COMMAND checks
+    // are currently implemented in the Mesos health check helper program.
+    val mesosHealthChecks: Set[org.apache.mesos.Protos.HealthCheck] =
+      app.healthChecks.flatMap { healthCheck =>
+        if (healthCheck.protocol != Protocol.COMMAND) None
+        else {
+          try { Some(healthCheck.toMesos(ports.map(_.toInt))) }
+          catch {
+            case cause: Throwable =>
+              log.warn(s"An error occurred with health check [$healthCheck]\n" +
+                s"Error: [${cause.getMessage}]")
+              None
+          }
+        }
       }
+
+    if (mesosHealthChecks.size > 1) {
+      val numUnusedChecks = mesosHealthChecks.size - 1
+      log.warn(
+        "Mesos supports one command health check per task.\n" +
+          s"Task [$taskId] will run without " +
+          s"$numUnusedChecks of its defined health checks."
+      )
     }
+
+    mesosHealthChecks.headOption.foreach(builder.setHealthCheck)
 
     Some(builder.build -> ports)
   }
@@ -195,7 +194,7 @@ class TaskBuilder(app: AppDefinition,
         None
 
       case Some(portRanges) =>
-        log.info("Met all constraints.")
+        log.debug("Met all constraints.")
         Some((cpuRole, memRole, diskRole, portRanges))
     }
   }
@@ -204,8 +203,13 @@ class TaskBuilder(app: AppDefinition,
 
 object TaskBuilder {
 
-  def commandInfo(app: AppDefinition, host: Option[String], ports: Seq[Long]): CommandInfo = {
-    val envMap = app.env ++ portsEnv(ports) ++ host.map("HOST" -> _)
+  def commandInfo(app: AppDefinition, taskId: Option[TaskID], host: Option[String], ports: Seq[Long]): CommandInfo = {
+    val containerPorts = for (pms <- app.portMappings) yield pms.map(_.containerPort)
+    val declaredPorts = containerPorts.getOrElse(app.ports)
+    val envMap: Map[String, String] =
+      app.env ++
+        taskContextEnv(app, taskId) ++
+        portsEnv(declaredPorts, ports) ++ host.map("HOST" -> _)
 
     val builder = CommandInfo.newBuilder()
       .setEnvironment(environment(envMap))
@@ -259,19 +263,36 @@ object TaskBuilder {
     builder.build()
   }
 
-  def portsEnv(ports: Seq[Long]): scala.collection.Map[String, String] = {
-    if (ports.isEmpty) {
+  def portsEnv(definedPorts: Seq[Integer], assignedPorts: Seq[Long]): Map[String, String] = {
+    if (assignedPorts.isEmpty) {
       return Map.empty
     }
 
     val env = mutable.HashMap.empty[String, String]
 
-    ports.zipWithIndex.foreach(p => {
-      env += (s"PORT${p._2}" -> p._1.toString)
-    })
+    assignedPorts.zipWithIndex.foreach {
+      case (p, n) =>
+        env += (s"PORT$n" -> p.toString)
+    }
 
-    env += ("PORT" -> ports.head.toString)
-    env += ("PORTS" -> ports.mkString(","))
-    env
+    definedPorts.zip(assignedPorts).foreach {
+      case (defined, assigned) =>
+        if (defined != AppDefinition.RandomPortValue) {
+          env += (s"PORT_$defined" -> assigned.toString)
+        }
+    }
+
+    env += ("PORT" -> assignedPorts.head.toString)
+    env += ("PORTS" -> assignedPorts.mkString(","))
+    env.toMap
   }
+
+  def taskContextEnv(app: AppDefinition, taskId: Option[TaskID]): Map[String, String] =
+    if (taskId.isEmpty) Map[String, String]()
+    else Map(
+      "MESOS_TASK_ID" -> taskId.get.getValue,
+      "MARATHON_APP_ID" -> app.id.toString,
+      "MARATHON_APP_VERSION" -> app.version.toString
+    )
+
 }

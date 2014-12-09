@@ -127,16 +127,24 @@ If you want to inspect the contents of the Docker:
 ## Companies using Marathon
 
 * [Airbnb](https://www.airbnb.com/)
+* [Artirix](http://www.artirix.com/)
+* [bol.com](https://www.bol.com/)
+* [Branding Brand](http://www.brandingbrand.com/)
+* [Daemon](http://www.daemon.com.au/)
 * [Disqus](https://www.disqus.com/)
 * [eBay](http://www.ebay.com/)
 * [The Factory](https://github.com/thefactory/)
 * [Guidewire](http://www.guidewire.com/)
+* [Groupon](http://www.groupon.com/)
 * [iQIYI](http://www.iqiyi.com/)
 * [OpenTable](http://www.opentable.com/)
 * [PayPal](https://www.paypal.com)
+* [Qubit](http://www.qubitproducts.com/)
+* [RelateIQ](http://relateiq.com/)
 * [Sailthru](http://www.sailthru.com/)
 * [Viadeo](http://www.viadeo.com)
 * [WooRank](http://www.woorank.com)
+* [Yelp](http://www.yelp.com/)
 
 Not in the list? Open a pull request and add yourself!
 
