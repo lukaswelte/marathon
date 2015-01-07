@@ -80,12 +80,15 @@ class DeploymentActor(
     else {
       eventBus.publish(DeploymentStatus(plan, step))
 
-      val futures = step.actions.map {
-        case StartApplication(app, scaleTo)                  => startApp(app, scaleTo)
-        case ScaleApplication(app, scaleTo)                  => scaleApp(app, scaleTo)
-        case StopApplication(app)                            => stopApp(app)
-        case RestartApplication(app, scaleOldTo, scaleNewTo) => restartApp(app, scaleOldTo, scaleNewTo)
-        case ResolveArtifacts(app, urls)                     => resolveArtifacts(app, urls)
+      val futures = step.actions.map { action =>
+        healthCheckManager.addAllFor(action.app) // ensure health check actors are in place before tasks are launched
+        action match {
+          case StartApplication(app, scaleTo)                  => startApp(app, scaleTo)
+          case ScaleApplication(app, scaleTo)                  => scaleApp(app, scaleTo)
+          case StopApplication(app)                            => stopApp(app)
+          case RestartApplication(app, scaleOldTo, scaleNewTo) => restartApp(app, scaleOldTo, scaleNewTo)
+          case ResolveArtifacts(app, urls)                     => resolveArtifacts(app, urls)
+        }
       }
 
       Future.sequence(futures).map(_ => ()) andThen {
@@ -96,7 +99,6 @@ class DeploymentActor(
   }
 
   def startApp(app: AppDefinition, scaleTo: Int): Future[Unit] = {
-    healthCheckManager.addAllFor(app) // ensure health check actors are in place before tasks are launched
     val promise = Promise[Unit]()
     context.actorOf(
       Props(
@@ -160,19 +162,25 @@ class DeploymentActor(
 
   def restartApp(app: AppDefinition, scaleOldTo: Int, scaleNewTo: Int): Future[Unit] = {
     healthCheckManager.addAllFor(app) // ensure health check actors are in place before tasks are launched
-    val res = Promise[Unit]()
+    val res = if (app.instances == 0) {
+      Future.successful(())
+    }
+    else {
+      val promise = Promise[Unit]()
+      context.actorOf(
+        Props(
+          new TaskReplaceActor(
+            driver,
+            taskQueue,
+            taskTracker,
+            eventBus,
+            app,
+            promise)))
 
-    context.actorOf(
-      Props(
-        new TaskReplaceActor(
-          driver,
-          taskQueue,
-          taskTracker,
-          eventBus,
-          app,
-          res)))
+      promise.future.map(_ => ())
+    }
 
-    storeAndThen(app, res.future)
+    storeAndThen(app, res)
   }
 
   def resolveArtifacts(app: AppDefinition, urls: Map[URL, String]): Future[Unit] = {
