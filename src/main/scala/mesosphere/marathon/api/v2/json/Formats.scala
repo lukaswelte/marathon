@@ -115,6 +115,11 @@ trait Formats
 
   implicit lazy val CommandFormat: Format[Command] = Json.format[Command]
 
+  implicit lazy val ParameterFormat: Format[Parameter] = (
+    (__ \ "key").format[String] ~
+    (__ \ "value").format[String]
+  )(Parameter(_, _), unlift(Parameter.unapply))
+
   /*
  * Helpers
  */
@@ -164,7 +169,7 @@ trait ContainerFormats {
     (__ \ "network").formatNullable[Network] ~
     (__ \ "portMappings").formatNullable[Seq[Docker.PortMapping]] ~
     (__ \ "privileged").formatNullable[Boolean].withDefault(false) ~
-    (__ \ "parameters").formatNullable[Map[String, String]].withDefault(Map.empty)
+    (__ \ "parameters").formatNullable[Seq[Parameter]].withDefault(Seq.empty)
   )(Docker(_, _, _, _, _), unlift(Docker.unapply))
 
   implicit val ModeFormat: Format[mesos.Volume.Mode] =
@@ -295,7 +300,14 @@ trait AppDefinitionFormats {
 
   implicit lazy val IdentifiableWrites = Json.writes[Identifiable]
 
-  implicit lazy val UpgradeStrategyFormat: Format[UpgradeStrategy] = Json.format[UpgradeStrategy]
+  implicit lazy val UpgradeStrategyWrites = Json.writes[UpgradeStrategy]
+  implicit lazy val UpgradeStrategyReads: Reads[UpgradeStrategy] = {
+    import mesosphere.marathon.state.AppDefinition._
+    (
+      (__ \ "minimumHealthCapacity").readNullable[JDouble].withDefault(DefaultUpgradeStrategy.minimumHealthCapacity) ~
+      (__ \ "maximumOverCapacity").readNullable[JDouble].withDefault(DefaultUpgradeStrategy.maximumOverCapacity)
+    )(UpgradeStrategy(_, _))
+  }
 
   implicit lazy val ConstraintFormat: Format[Constraint] = Format(
     Reads.of[Seq[String]].map { seq =>
@@ -338,14 +350,30 @@ trait AppDefinitionFormats {
       (__ \ "requirePorts").readNullable[Boolean].withDefault(DefaultRequirePorts) ~
       (__ \ "backoffSeconds").readNullable[Long].withDefault(DefaultBackoff.toSeconds).asSeconds ~
       (__ \ "backoffFactor").readNullable[Double].withDefault(DefaultBackoffFactor) ~
+      (__ \ "maxLaunchDelaySeconds").readNullable[Long].withDefault(DefaultMaxLaunchDelay.toSeconds).asSeconds ~
       (__ \ "container").readNullable[Container] ~
       (__ \ "healthChecks").readNullable[Set[HealthCheck]].withDefault(DefaultHealthChecks) ~
-      (__ \ "dependencies").readNullable[Set[PathId]].withDefault(DefaultDependencies) ~
-      (__ \ "upgradeStrategy").readNullable[UpgradeStrategy].withDefault(DefaultUpgradeStrategy)
+      (__ \ "dependencies").readNullable[Set[PathId]].withDefault(DefaultDependencies)
     )(AppDefinition(_, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _)).flatMap { app =>
-        // necessary because of case class limitations
-        (__ \ "version").readNullable[Timestamp].withDefault(Timestamp.now()).map { v =>
-          app.copy(version = v)
+        // necessary because of case class limitations (good for another 21 fields)
+        case class ExtraFields(
+          upgradeStrategy: UpgradeStrategy,
+          labels: Map[String, String],
+          version: Timestamp)
+
+        val extraReads: Reads[ExtraFields] =
+          (
+            (__ \ "upgradeStrategy").readNullable[UpgradeStrategy].withDefault(DefaultUpgradeStrategy) ~
+            (__ \ "labels").readNullable[Map[String, String]].withDefault(DefaultLabels) ~
+            (__ \ "version").readNullable[Timestamp].withDefault(Timestamp.now())
+          )(ExtraFields(_, _, _))
+
+        extraReads.map { extraFields =>
+          app.copy(
+            upgradeStrategy = extraFields.upgradeStrategy,
+            labels = extraFields.labels,
+            version = extraFields.version
+          )
         }
       }
   }
@@ -375,10 +403,12 @@ trait AppDefinitionFormats {
           "requirePorts" -> app.requirePorts,
           "backoffSeconds" -> app.backoff,
           "backoffFactor" -> app.backoffFactor,
+          "maxLaunchDelaySeconds" -> app.maxLaunchDelay,
           "container" -> app.container,
           "healthChecks" -> app.healthChecks,
           "dependencies" -> app.dependencies,
           "upgradeStrategy" -> app.upgradeStrategy,
+          "labels" -> app.labels,
           "version" -> app.version
         )
       }
@@ -389,7 +419,7 @@ trait AppDefinitionFormats {
     }
   }
 
-  implicit lazy val AppUpdateFormat: Reads[AppUpdate] = {
+  implicit lazy val AppUpdateReads: Reads[AppUpdate] = {
 
     (
       (__ \ "id").readNullable[PathId] ~
@@ -409,15 +439,32 @@ trait AppDefinitionFormats {
       (__ \ "requirePorts").readNullable[Boolean] ~
       (__ \ "backoffSeconds").readNullable[Long].map(_.map(_.seconds)) ~
       (__ \ "backoffFactor").readNullable[JDouble] ~
+      (__ \ "maxLaunchDelaySeconds").readNullable[Long].map(_.map(_.seconds)) ~
       (__ \ "container").readNullable[Container] ~
       (__ \ "healthChecks").readNullable[Set[HealthCheck]] ~
-      (__ \ "dependencies").readNullable[Set[PathId]] ~
-      (__ \ "upgradeStrategy").readNullable[UpgradeStrategy]
-    )(AppUpdate(_, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _)).flatMap { app =>
-        // necessary because of case class limitations
-        (__ \ "version").readNullable[Timestamp].map { v =>
-          app.copy(version = v)
+      (__ \ "dependencies").readNullable[Set[PathId]]
+    )(AppUpdate(_, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _)).flatMap { update =>
+        // necessary because of case class limitations (good for another 21 fields)
+        case class ExtraFields(
+          upgradeStrategy: Option[UpgradeStrategy],
+          labels: Option[Map[String, String]],
+          version: Option[Timestamp])
+
+        val extraReads: Reads[ExtraFields] =
+          (
+            (__ \ "upgradeStrategy").readNullable[UpgradeStrategy] ~
+            (__ \ "labels").readNullable[Map[String, String]] ~
+            (__ \ "version").readNullable[Timestamp]
+          )(ExtraFields(_, _, _))
+
+        extraReads.map { extraFields =>
+          update.copy(
+            upgradeStrategy = extraFields.upgradeStrategy,
+            labels = extraFields.labels,
+            version = extraFields.version
+          )
         }
+
       }
   }
 }

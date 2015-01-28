@@ -1,19 +1,18 @@
 /** @jsx React.DOM */
 
-define([
-  "React"
-], function(React) {
-  "use strict";
+var React = require("react/addons");
 
-  return React.createClass({
-    displayName: "StackedViewComponent",
-    render: function() {
-      /* jshint trailing:false, quotmark:false, newcap:false */
-      return (
-        <div>
-          {this.props.children[this.props.activeViewIndex]}
-        </div>
-      );
-    }
-  });
+var StackedViewComponent = React.createClass({
+  displayName: "StackedViewComponent",
+  render: function () {
+    /* jshint trailing:false, quotmark:false, newcap:false */
+    /* jscs:disable disallowTrailingWhitespace, validateQuoteMarks, maximumLineLength */
+    return (
+      <div>
+        {this.props.children[this.props.activeViewIndex]}
+      </div>
+    );
+  }
 });
+
+module.exports = StackedViewComponent;

@@ -44,7 +44,9 @@ Docker version 1.0.0 or later installed on each slave node.
 
 ### Configure marathon
 
-1. Increase the marathon [command line option]({{ site.baseurl }}/docs/command-line-flags.html") `--task_launch_timeout` to at least the executor timeout you set on your slaves in the previous step.
+1. Increase the marathon [command line option]({{ site.baseurl }}/docs/command-line-flags.html)
+`--task_launch_timeout` to at least the executor timeout, in milliseconds, 
+you set on your slaves in the previous step.
 
 ### Resources
 
@@ -224,11 +226,11 @@ the future, as Mesos may not always interact with Docker via the CLI.
         "docker": {
             "image": "mesosphere/inky"
             "privileged": true,
-            "parameters": {
-                "hostname": "a.corp.org",
-                "volumes-from": "another-container",
-                "lxc-conf": "..."
-            }
+            "parameters": [
+                { "key": "hostname", "value": "a.corp.org" },
+                { "key": "volumes-from", "value": "another-container" },
+                { "key": "lxc-conf", "value": "..." }
+            ]
         },
         "type": "DOCKER",
         "volumes": []

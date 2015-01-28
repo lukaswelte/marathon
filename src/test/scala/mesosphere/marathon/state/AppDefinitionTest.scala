@@ -45,6 +45,8 @@ class AppDefinitionTest extends MarathonSpec with Matchers with ModelValidation 
     assert(256 == getScalarResourceValue(proto1, "mem"), 1e-6)
     assert("bash foo-*/start -Dhttp.port=$PORT" == proto1.getCmd.getValue)
     assert(!proto1.hasContainer)
+    assert(1.0 == proto1.getUpgradeStrategy.getMinimumHealthCapacity)
+    assert(1.0 == proto1.getUpgradeStrategy.getMaximumOverCapacity)
 
     val app2 = AppDefinition(
       id = "play".toPath,
@@ -57,7 +59,8 @@ class AppDefinitionTest extends MarathonSpec with Matchers with ModelValidation 
       mem = 256,
       instances = 5,
       ports = Seq(8080, 8081),
-      executor = "//cmd"
+      executor = "//cmd",
+      upgradeStrategy = UpgradeStrategy(0.7, 0.4)
     )
 
     val proto2 = app2.toProto
@@ -71,6 +74,8 @@ class AppDefinitionTest extends MarathonSpec with Matchers with ModelValidation 
     assert(4 == getScalarResourceValue(proto2, "cpus"), 1e-6)
     assert(256 == getScalarResourceValue(proto2, "mem"), 1e-6)
     assert(proto2.hasContainer)
+    assert(0.7 == proto2.getUpgradeStrategy.getMinimumHealthCapacity)
+    assert(0.4 == proto2.getUpgradeStrategy.getMaximumOverCapacity)
   }
 
   test("MergeFromProto") {
@@ -101,7 +106,12 @@ class AppDefinitionTest extends MarathonSpec with Matchers with ModelValidation 
       mem = 256,
       instances = 5,
       ports = Seq(8080, 8081),
-      executor = "//cmd"
+      executor = "//cmd",
+      labels = Map(
+        "one" -> "aaa",
+        "two" -> "bbb",
+        "three" -> "ccc"
+      )
     )
     val result1 = AppDefinition().mergeFromProto(app1.toProto)
     assert(result1 == app1)
@@ -206,6 +216,30 @@ class AppDefinitionTest extends MarathonSpec with Matchers with ModelValidation 
       "AppDefinition must either contain one of 'cmd' or 'args', and/or a 'container'."
     )
 
+    shouldViolate(
+      correct.copy(upgradeStrategy = UpgradeStrategy(1.2)),
+      "upgradeStrategy.minimumHealthCapacity",
+      "is greater than 1"
+    )
+
+    shouldViolate(
+      correct.copy(upgradeStrategy = UpgradeStrategy(0.5, 1.2)),
+      "upgradeStrategy.maximumOverCapacity",
+      "is greater than 1"
+    )
+
+    shouldViolate(
+      correct.copy(upgradeStrategy = UpgradeStrategy(-1.2)),
+      "upgradeStrategy.minimumHealthCapacity",
+      "is less than 0"
+    )
+
+    shouldViolate(
+      correct.copy(upgradeStrategy = UpgradeStrategy(0.5, -1.2)),
+      "upgradeStrategy.maximumOverCapacity",
+      "is less than 0"
+    )
+
     shouldNotViolate(
       correct.copy(
         container = Some(Container(
@@ -302,6 +336,7 @@ class AppDefinitionTest extends MarathonSpec with Matchers with ModelValidation 
       requirePorts = true,
       backoff = 5.seconds,
       backoffFactor = 1.5,
+      maxLaunchDelay = 3.minutes,
       container = Some(
         Container(docker = Some(Container.Docker("group/image")))
       ),
@@ -428,12 +463,18 @@ class AppDefinitionTest extends MarathonSpec with Matchers with ModelValidation 
             }
         ],
         "instances": 3,
+        "labels": {
+          "one": "aaa",
+          "two": "bbb",
+          "three": "ccc"
+        },
         "ports": [
             8080,
             9000
         ],
         "backoffSeconds": 1,
         "backoffFactor": 1.15,
+        "maxLaunchDelaySeconds": 300,
         "tasksRunning": 3,
         "tasksStaged": 0,
         "uris": [
@@ -441,7 +482,8 @@ class AppDefinitionTest extends MarathonSpec with Matchers with ModelValidation 
         ],
         "dependencies": ["/product/db/mongo", "/product/db", "../../db"],
         "upgradeStrategy": {
-            "minimumHealthCapacity": 0.5
+            "minimumHealthCapacity": 0.5,
+            "maximumOverCapacity": 0.5
         },
         "version": "2014-03-01T23:29:30.158Z"
     }"""

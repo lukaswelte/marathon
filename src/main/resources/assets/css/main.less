@@ -157,8 +157,14 @@ a,
   border-color: #3d4045;
 }
 
-.list-inline > li {
-  margin-right: 10px;
+.table > tbody > tr > td > .list-inline,
+.table > thead > tr > th > .list-inline {
+  margin-bottom: 0;
+}
+
+.table > tbody > tr > td > .list-inline > li,
+.table > thead > tr > th > .list-inline > li {
+  padding: 0 0 5px 5px;
 }
 
 .list-inline-subtext {
